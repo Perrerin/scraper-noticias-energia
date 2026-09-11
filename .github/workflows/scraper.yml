@@ -2,20 +2,18 @@ name: Executar Scraper de Noticias
 
 on:
   schedule:
-    # Sintaxis Cron: Minuto Hora Día-del-mes Mes Día-de-la-semana (1 = Lunes)
-    # GitHub Actions usa la hora UTC. Ajusta la hora según tu zona horaria.
-    - cron: '0 14 * * 1' # Ejemplo: 14:00 UTC = 9:00 AM en Colombia/Perú/Panamá (UTC-5)
-  workflow_dispatch: # Permite ejecutar el script manualmente desde la web de GitHub para probar
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
 
 jobs:
   run-scraper:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write # Otorga permisos para guardar los cambios de noticias_master.csv en el repo
+      contents: write
 
     steps:
-      - - name: Descargar el código del repositorio
+      - name: Descargar el codigo del repositorio
         uses: actions/checkout@v4.2.2
 
       - name: Configurar Python
@@ -36,5 +34,5 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add noticias_master.csv
-          git diff-index --quiet HEAD || git commit -m "bot: actualización automática de noticias_master.csv"
+          git diff-index --quiet HEAD || git commit -m "bot: actualizacion automatica de noticias_master.csv"
           git push
