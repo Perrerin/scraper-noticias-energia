@@ -268,7 +268,6 @@ if __name__ == "__main__":
     archivo_csv = "noticias_master.csv"
 
     if not df_nuevas.empty:
-        # Si el archivo maestro ya existe, combinar e impedir duplicados por la URL de la noticia
         if os.path.exists(archivo_csv):
             df_existente = pd.read_csv(archivo_csv)
             df_final = (
@@ -281,6 +280,16 @@ if __name__ == "__main__":
             df_final = df_nuevas.drop_duplicates(subset=['URL Verificada']).sort_values(
                 by=['País', 'Fecha Publicación'], ascending=[True, False]
             ).reset_index(drop=True)
+
+        # =========================================================
+        # NUEVAS COLUMNAS TEMPORALES PARA POWER BI (Añadir aquí)
+        # =========================================================
+        df_final['Fecha_DT'] = pd.to_datetime(df_final['Fecha Publicación'], errors='coerce')
+        df_final['Año'] = df_final['Fecha_DT'].dt.year
+        df_final['Mes_Num'] = df_final['Fecha_DT'].dt.month
+        df_final['Mes'] = df_final['Fecha_DT'].dt.strftime('%B')
+        df_final['Año-Mes'] = df_final['Fecha_DT'].dt.strftime('%Y-%m')
+        # =========================================================
 
         df_final.to_csv(archivo_csv, index=False, encoding='utf-8-sig')
         print(f"\n✅ Reporte maestro actualizado exitosamente en '{archivo_csv}'")
