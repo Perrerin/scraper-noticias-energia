@@ -1,0 +1,5 @@
+feedparser
+pandas
+beautifulsoup4
+python-dateutil
+openpyxl
