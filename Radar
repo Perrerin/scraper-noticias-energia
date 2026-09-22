@@ -1,0 +1,279 @@
+import pandas as pd
+import random
+from datetime import datetime, timedelta
+import os
+
+os.makedirs("data", exist_ok=True)
+
+# ===============================
+# RADAR
+# ===============================
+
+tecnologias = [
+    ("Digital Twin", "Digital", "Siemens"),
+    ("CBTC NextGen", "Metro", "Alstom"),
+    ("Predictive Maintenance AI", "Digital", "Hitachi Rail"),
+    ("ATO GoA4", "Metro", "Siemens"),
+    ("Smart Ropeway", "Cable", "Doppelmayr"),
+    ("Urban Ropeway Analytics", "Cable", "Poma"),
+    ("BRT Fleet Optimization", "BRT", "Optibus"),
+    ("Autonomous Tram", "Tranvia", "CAF"),
+    ("Smart Energy Grid", "Digital", "Schneider"),
+    ("IoT Asset Monitoring", "Digital", "Thales"),
+    ("Passenger Flow AI", "Metro", "Huawei"),
+    ("Battery Tram", "Tranvia", "Stadler"),
+    ("Hydrogen Rail", "Metro", "Alstom"),
+    ("Smart Ticketing", "Digital", "Cubic"),
+    ("Vision Based Inspection", "Digital", "Hitachi Rail")
+]
+
+acciones = ["Observar", "Experimentar", "Adoptar", "Escalar"]
+
+datos_radar = []
+
+for tecnologia, categoria, proveedor in tecnologias:
+
+    impacto = random.randint(50, 98)
+    madurez = random.randint(40, 98)
+    compatibilidad = random.randint(50, 95)
+    costo_beneficio = random.randint(50, 95)
+    urgencia = random.randint(40, 95)
+
+    score = round(
+        impacto * 0.30 +
+        madurez * 0.20 +
+        compatibilidad * 0.20 +
+        costo_beneficio * 0.20 +
+        urgencia * 0.10,
+        1
+    )
+
+    if score >= 85:
+        accion = "Escalar"
+    elif score >= 70:
+        accion = "Adoptar"
+    elif score >= 50:
+        accion = "Experimentar"
+    else:
+        accion = "Observar"
+
+    datos_radar.append([
+        tecnologia,
+        categoria,
+        proveedor,
+        impacto,
+        madurez,
+        compatibilidad,
+        costo_beneficio,
+        urgencia,
+        score,
+        accion
+    ])
+
+radar = pd.DataFrame(
+    datos_radar,
+    columns=[
+        "tecnologia",
+        "categoria",
+        "proveedor",
+        "impacto",
+        "madurez",
+        "compatibilidad",
+        "costo_beneficio",
+        "urgencia",
+        "score",
+        "accion"
+    ]
+)
+
+radar.to_csv("data/radar.csv", index=False)
+
+# ===============================
+# TENDENCIAS
+# ===============================
+
+tendencias = pd.DataFrame({
+    "categoria": [
+        "Metro",
+        "Digital",
+        "Cable",
+        "Tranvia",
+        "BRT"
+    ],
+    "menciones": [
+        215,
+        340,
+        72,
+        95,
+        58
+    ],
+    "promedio_relevancia": [
+        86,
+        91,
+        70,
+        76,
+        62
+    ],
+    "estado": [
+        "Caliente",
+        "Caliente",
+        "Seguimiento",
+        "Seguimiento",
+        "Emergente"
+    ]
+})
+
+tendencias.to_csv(
+    "data/tendencias.csv",
+    index=False
+)
+
+# ===============================
+# ALERTAS
+# ===============================
+
+alertas = pd.DataFrame([
+    [
+        "Tendencia Alta",
+        "Digital",
+        "Fuerte crecimiento de IA e IoT ferroviario"
+    ],
+    [
+        "Tendencia Alta",
+        "Metro",
+        "Incremento de proyectos CBTC a nivel global"
+    ],
+    [
+        "Obsolescencia",
+        "Sistema legado",
+        "Tecnología cercana a fin de soporte"
+    ]
+],
+columns=[
+    "tipo",
+    "tecnologia",
+    "mensaje"
+])
+
+alertas.to_csv(
+    "data/alertas_tendencias.csv",
+    index=False
+)
+
+# ===============================
+# BENCHMARK
+# ===============================
+
+benchmark = pd.DataFrame([
+    [
+        "MTR Hong Kong",
+        "Digital Twin",
+        "Siemens",
+        "Reducción de fallas 18%"
+    ],
+    [
+        "Metro de Santiago",
+        "CBTC",
+        "Alstom",
+        "Incremento capacidad 12%"
+    ],
+    [
+        "RATP Paris",
+        "IA Mantenimiento",
+        "Hitachi Rail",
+        "Menos tiempo fuera de servicio"
+    ],
+    [
+        "Transport for London",
+        "BRT Optimization",
+        "Optibus",
+        "Mejor utilización de flota"
+    ],
+    [
+        "Medellín Demo",
+        "Smart Ropeway",
+        "Doppelmayr",
+        "Caso de referencia cable urbano"
+    ]
+],
+columns=[
+    "operador",
+    "tecnologia",
+    "proveedor",
+    "resultado"
+])
+
+benchmark.to_csv(
+    "data/benchmark.csv",
+    index=False
+)
+
+# ===============================
+# NOTICIAS ANALIZADAS
+# ===============================
+
+titulos = [
+    "Siemens launches advanced CBTC platform",
+    "Hitachi introduces predictive maintenance AI",
+    "Alstom deploys hydrogen mobility solution",
+    "Digital Twin improves rail reliability",
+    "Urban ropeway analytics improve safety",
+    "Smart ticketing adoption expands globally",
+    "Battery tram project enters operation",
+    "IoT sensors transform asset management",
+    "Metro automation reaches GoA4 level",
+    "Passenger flow AI deployed in Asia"
+]
+
+noticias = []
+
+for i in range(50):
+
+    fecha = (
+        datetime.now() -
+        timedelta(days=random.randint(0, 120))
+    )
+
+    noticias.append([
+        fecha.date(),
+        random.choice(titulos),
+        random.choice([
+            "Metro",
+            "Digital",
+            "Cable",
+            "Tranvia",
+            "BRT"
+        ]),
+        random.choice([
+            "Siemens",
+            "Alstom",
+            "Hitachi Rail",
+            "CAF",
+            "Doppelmayr",
+            "Huawei"
+        ]),
+        random.randint(50, 100)
+    ])
+
+noticias_df = pd.DataFrame(
+    noticias,
+    columns=[
+        "fecha",
+        "titulo",
+        "categoria",
+        "proveedor_detectado",
+        "relevancia"
+    ]
+)
+
+noticias_df.to_csv(
+    "data/noticias_analizadas.csv",
+    index=False
+)
+
+print("\nDatos demo generados correctamente:")
+print(" - data/radar.csv")
+print(" - data/tendencias.csv")
+print(" - data/alertas_tendencias.csv")
+print(" - data/benchmark.csv")
+print(" - data/noticias_analizadas.csv")
