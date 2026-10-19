@@ -62,6 +62,28 @@ TEMATICAS_GENERALES = [
     "descarbonización", "matriz energética", "litio", "baterías", "almacenamiento de energía",
 ]
 
+# Grupos de temáticas: todos los términos de un grupo se cuentan juntos y se
+# muestran con el nombre del grupo en la columna Temática.
+AGRUPACION_TEMATICAS = {
+    "Energía Renovable": [
+        "renovable", "renovables", "renovável", "renováveis", "renovaveis",
+        "energía renovable", "energías renovables", "energia renovável", "energias renováveis",
+        "solar", "fotovoltaica", "fotovoltaico", "eólica", "eolica", "eólico", "eólico marino",
+        "hidrógeno verde", "hidrogênio verde", "biomasa", "biomassa", "biogás", "biogas",
+        "geotermia", "geotérmica", "geotermica",
+    ],
+    "Hidrocarburos": [
+        "hidrocarburos", "hidrocarburo", "hidrocarbonetos",
+        "petróleo", "petroleo", "petróleo crudo", "barril de petróleo", "pré-sal", "pre-sal",
+        "gas natural", "gás natural", "gas natural licuado", "GNL", "GLP", "gas licuado",
+        "combustible", "combustibles", "combustível", "combustíveis",
+        "gasolina", "diésel", "diesel", "ACPM", "fueloil", "fuel oil",
+        "refinería", "refinerías", "refineria", "refinaria",
+        "oleoducto", "oleoductos", "gasoducto", "gasoductos", "gasoduto",
+        "fracking", "fracturación hidráulica", "exploración petrolera", "pozos petroleros",
+    ],
+}
+
 # Nombres antiguos de columnas -> nombres nuevos (para no perder el histórico del CSV)
 COLUMNAS_RENOMBRADAS = {"Términos del Sector": "Temática"}
 
@@ -326,31 +348,79 @@ def es_sigla(termino):
     return termino.isupper() and " " not in termino
 
 
+def clave_termino(termino):
+    """Agrupa variantes del mismo término: 'Energía' = 'energia'."""
+    t = unicodedata.normalize("NFKD", termino).encode("ascii", "ignore").decode()
+    return re.sub(r"\s+", " ", t.lower()).strip()
+
+
+def grupo_de_termino():
+    """clave de término -> nombre del grupo (según AGRUPACION_TEMATICAS)."""
+    return {clave_termino(t): grupo for grupo, terminos in AGRUPACION_TEMATICAS.items() for t in terminos}
+
+
 def compilar_patrones_pais(data):
     siglas = [e for e in data["entidades"] if es_sigla(e)]
     nombres = [e for e in data["entidades"] if not es_sigla(e)]
+    # Orden de prioridad: primero los términos del país, luego TEMATICAS_GENERALES
+    lista_terminos = list(data["terminos_sector"]) + TEMATICAS_GENERALES
+    grupos = grupo_de_termino()
+    lista_terminos += [t for terminos in AGRUPACION_TEMATICAS.values() for t in terminos]
+    prioridad = {}
+    for termino in lista_terminos:
+        clave = clave_termino(termino)
+        grupo = grupos.get(clave)
+        # Un grupo hereda la posición de su primer término en la lista
+        prioridad.setdefault(clave_termino(grupo) if grupo else clave, (len(prioridad), grupo or termino))
     return {
         # "ICE", "SEC", "SEN"... solo en mayúsculas para evitar falsos positivos
         "entidades": [compilar_patron(siglas, False), compilar_patron(nombres, True)],
-        # Sector del país + temáticas generales (ver TEMATICAS_GENERALES)
-        "terminos": [compilar_patron(list(data["terminos_sector"]) + TEMATICAS_GENERALES, True)],
+        "terminos": [compilar_patron(lista_terminos, True)],
+        "prioridad": prioridad,  # clave -> (posición en la lista, forma a mostrar)
+        "grupos": grupos,
     }
 
 
-def formatear_tematica(terminos):
-    return ", ".join(t.title() for t in terminos)
+def elegir_tematica(texto, patrones):
+    """
+    Devuelve UNA sola temática:
+      1. la que más veces se nombra en la noticia;
+      2. si hay empate, la que aparece primero en la lista suministrada
+         (términos del país antes que TEMATICAS_GENERALES).
+    Devuelve "" si la noticia no contiene ninguna.
+    """
+    conteo = Counter()
+    for patron in patrones["terminos"]:
+        if patron is not None:
+            for m in patron.findall(texto):
+                clave = clave_termino(m)
+                grupo = patrones["grupos"].get(clave)
+                conteo[clave_termino(grupo) if grupo else clave] += 1
+    if not conteo:
+        return ""
+    prioridad = patrones["prioridad"]
+    ganadora = min(conteo, key=lambda k: (-conteo[k], prioridad.get(k, (10**6, k))[0]))
+    forma = prioridad.get(ganadora, (0, ganadora))[1]
+    return forma[:1].upper() + forma[1:]
 
 
 def completar_tematica(df, config):
-    """Recalcula la Temática de filas vacías/N/A (histórico) y elimina las que no tienen ninguna."""
-    vacias = df["Temática"].str.strip().str.upper().isin(["", "N/A", "NAN"])
-    if vacias.any():
-        patrones = {pais: compilar_patrones_pais(data)["terminos"] for pais, data in config.items()}
-        generico = [compilar_patron(TEMATICAS_GENERALES, True)]
-        def calcular(fila):
-            texto = f"{fila['Título']} {fila['Resumen']}"
-            return formatear_tematica(coincidencias(texto, patrones.get(fila["País"], generico)))
-        df.loc[vacias, "Temática"] = df.loc[vacias].apply(calcular, axis=1)
+    """Deja una sola temática por fila (también en el histórico) y elimina las que no tienen ninguna."""
+    patrones = {pais: compilar_patrones_pais(data) for pais, data in config.items()}
+    generico = compilar_patrones_pais({"entidades": [], "terminos_sector": []})
+    grupos = grupo_de_termino()
+
+    def calcular(fila):
+        tematica = elegir_tematica(f"{fila['Título']} {fila['Resumen']}", patrones.get(fila["País"], generico))
+        if tematica:
+            return tematica
+        # Respaldo: primera temática que ya tenía guardada la fila
+        previa = str(fila["Temática"]).split(",")[0].strip()
+        if previa.upper() in ("", "N/A", "NAN"):
+            return ""
+        return grupos.get(clave_termino(previa), previa)
+
+    df["Temática"] = df.apply(calcular, axis=1) if len(df) else df["Temática"]
     sin_tematica = df["Temática"].str.strip() == ""
     if sin_tematica.any():
         log.warning("Se eliminan %d noticias del histórico sin temática en su texto.", int(sin_tematica.sum()))
@@ -404,8 +474,8 @@ def procesar_tarea(tarea, patrones, fecha_limite):
         titulo = limpiar_texto(entry.get("title", ""))
         resumen = limpiar_texto(entry.get("summary", entry.get("description", "")))
         texto = f"{titulo} {resumen}"
-        terminos = coincidencias(texto, patrones["terminos"])
-        if not terminos:
+        tematica = elegir_tematica(texto, patrones)
+        if not tematica:
             continue  # Temática obligatoria: sin temática en el artículo, no se guarda
 
         if es_rss:
@@ -418,7 +488,7 @@ def procesar_tarea(tarea, patrones, fecha_limite):
             "País": tarea["pais"],
             "Fuente": nombre_fuente,
             "Entidades Coincidentes": entidades_txt,
-            "Temática": formatear_tematica(terminos),
+            "Temática": tematica,
             "Linea de negocio": LINEA_NEGOCIO,
             "Palabras Clave (Keywords)": extraer_palabras_clave(texto),
             "Título": titulo,
