@@ -84,6 +84,23 @@ AGRUPACION_TEMATICAS = {
     ],
 }
 
+# Traducción al español de los términos en portugués (u otras variantes) para que la
+# columna Temática quede siempre en español. El texto de la noticia NO se modifica.
+EQUIVALENCIAS_ES = {
+    "eletricidade": "electricidad",
+    "elétrica": "eléctrica", "eletrica": "eléctrica",
+    "tarifa de energia": "tarifa de energía",
+    "hidrogênio": "hidrógeno", "hidrogenio": "hidrógeno",
+    "hidrelétrica": "hidroeléctrica", "hidreletrica": "hidroeléctrica",
+    "termelétrica": "termoeléctrica", "termeletrica": "termoeléctrica",
+    "reservatório": "embalse", "reservatorio": "embalse",
+    "transmissão": "transmisión", "transmissao": "transmisión",
+    "geração": "generación", "geracao": "generación",
+    "mercado livre": "mercado libre de energía",
+    "bandeira tarifária": "bandera tarifaria", "bandeira tarifaria": "bandera tarifaria",
+    "Formula Tarifaria": "fórmula tarifaria",
+}
+
 # Nombres antiguos de columnas -> nombres nuevos (para no perder el histórico del CSV)
 COLUMNAS_RENOMBRADAS = {"Términos del Sector": "Temática"}
 
@@ -354,61 +371,80 @@ def clave_termino(termino):
     return re.sub(r"\s+", " ", t.lower()).strip()
 
 
-def grupo_de_termino():
-    """clave de término -> nombre del grupo (según AGRUPACION_TEMATICAS)."""
-    return {clave_termino(t): grupo for grupo, terminos in AGRUPACION_TEMATICAS.items() for t in terminos}
+def _acentos(texto):
+    return sum(1 for c in texto if ord(c) > 127)
+
+
+def mapa_tematicas(lista_terminos):
+    """
+    clave de término -> nombre en español que se muestra en la columna Temática.
+    Orden de resolución: grupo (AGRUPACION_TEMATICAS) > traducción (EQUIVALENCIAS_ES)
+    > forma española con tildes de la lista ('energia' -> 'energía').
+    """
+    mapa = {}
+    for termino in lista_terminos:  # forma con más tildes: 'energía' gana a 'energia'
+        clave = clave_termino(termino)
+        if clave not in mapa or _acentos(termino) > _acentos(mapa[clave]):
+            mapa[clave] = termino
+    for origen, destino in EQUIVALENCIAS_ES.items():
+        actual = mapa.get(clave_termino(destino))
+        nombre = actual if actual and _acentos(actual) >= _acentos(destino) else destino
+        mapa[clave_termino(origen)] = mapa[clave_termino(destino)] = nombre
+    for grupo, terminos in AGRUPACION_TEMATICAS.items():
+        for termino in terminos:
+            mapa[clave_termino(termino)] = grupo
+    return {clave: nombre[:1].upper() + nombre[1:] for clave, nombre in mapa.items()}
 
 
 def compilar_patrones_pais(data):
     siglas = [e for e in data["entidades"] if es_sigla(e)]
     nombres = [e for e in data["entidades"] if not es_sigla(e)]
-    # Orden de prioridad: primero los términos del país, luego TEMATICAS_GENERALES
-    lista_terminos = list(data["terminos_sector"]) + TEMATICAS_GENERALES
-    grupos = grupo_de_termino()
-    lista_terminos += [t for terminos in AGRUPACION_TEMATICAS.values() for t in terminos]
+    # Orden de prioridad: términos del país, TEMATICAS_GENERALES y luego los de los grupos
+    lista_terminos = (list(data["terminos_sector"]) + TEMATICAS_GENERALES
+                      + [t for terminos in AGRUPACION_TEMATICAS.values() for t in terminos])
+    nombres_es = mapa_tematicas(lista_terminos)
     prioridad = {}
     for termino in lista_terminos:
-        clave = clave_termino(termino)
-        grupo = grupos.get(clave)
-        # Un grupo hereda la posición de su primer término en la lista
-        prioridad.setdefault(clave_termino(grupo) if grupo else clave, (len(prioridad), grupo or termino))
+        # Cada temática en español hereda la posición de su primer término en la lista
+        prioridad.setdefault(clave_termino(nombres_es[clave_termino(termino)]), len(prioridad))
     return {
         # "ICE", "SEC", "SEN"... solo en mayúsculas para evitar falsos positivos
         "entidades": [compilar_patron(siglas, False), compilar_patron(nombres, True)],
         "terminos": [compilar_patron(lista_terminos, True)],
-        "prioridad": prioridad,  # clave -> (posición en la lista, forma a mostrar)
-        "grupos": grupos,
+        "nombres_es": nombres_es,   # clave del término -> temática en español
+        "prioridad": prioridad,     # clave de la temática -> posición en la lista
     }
 
 
 def elegir_tematica(texto, patrones):
     """
-    Devuelve UNA sola temática:
-      1. la que más veces se nombra en la noticia;
+    Devuelve UNA sola temática, siempre en español:
+      1. la que más veces se nombra en la noticia (sumando sinónimos, traducciones y grupos);
       2. si hay empate, la que aparece primero en la lista suministrada
          (términos del país antes que TEMATICAS_GENERALES).
     Devuelve "" si la noticia no contiene ninguna.
     """
-    conteo = Counter()
+    nombres_es = patrones["nombres_es"]
+    conteo, nombre_de = Counter(), {}
     for patron in patrones["terminos"]:
         if patron is not None:
             for m in patron.findall(texto):
                 clave = clave_termino(m)
-                grupo = patrones["grupos"].get(clave)
-                conteo[clave_termino(grupo) if grupo else clave] += 1
+                nombre = nombres_es.get(clave, m[:1].upper() + m[1:])
+                conteo[clave_termino(nombre)] += 1
+                nombre_de[clave_termino(nombre)] = nombre
     if not conteo:
         return ""
     prioridad = patrones["prioridad"]
-    ganadora = min(conteo, key=lambda k: (-conteo[k], prioridad.get(k, (10**6, k))[0]))
-    forma = prioridad.get(ganadora, (0, ganadora))[1]
-    return forma[:1].upper() + forma[1:]
+    ganadora = min(conteo, key=lambda k: (-conteo[k], prioridad.get(k, 10**6)))
+    return nombre_de[ganadora]
 
 
 def completar_tematica(df, config):
     """Deja una sola temática por fila (también en el histórico) y elimina las que no tienen ninguna."""
     patrones = {pais: compilar_patrones_pais(data) for pais, data in config.items()}
     generico = compilar_patrones_pais({"entidades": [], "terminos_sector": []})
-    grupos = grupo_de_termino()
+    nombres_es = generico["nombres_es"]
 
     def calcular(fila):
         tematica = elegir_tematica(f"{fila['Título']} {fila['Resumen']}", patrones.get(fila["País"], generico))
@@ -418,7 +454,7 @@ def completar_tematica(df, config):
         previa = str(fila["Temática"]).split(",")[0].strip()
         if previa.upper() in ("", "N/A", "NAN"):
             return ""
-        return grupos.get(clave_termino(previa), previa)
+        return nombres_es.get(clave_termino(previa), previa)
 
     df["Temática"] = df.apply(calcular, axis=1) if len(df) else df["Temática"]
     sin_tematica = df["Temática"].str.strip() == ""
