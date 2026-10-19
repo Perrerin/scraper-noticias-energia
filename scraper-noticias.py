@@ -45,6 +45,23 @@ COLUMNAS_BASE = [
 COLUMNAS_PBI = ["Fecha_DT", "Año", "Mes_Num", "Mes", "Año-Mes"]
 
 LINEA_NEGOCIO = os.getenv("LINEA_NEGOCIO", "Energía")
+# Temáticas generales del sector, válidas para todos los países (se suman a las de
+# cada país). Una noticia SOLO se guarda si su texto contiene al menos una temática.
+TEMATICAS_GENERALES = [
+    "energía", "energia", "energético", "energética", "energetico", "energetica",
+    "electricidad", "eléctrico", "eléctrica", "electrico", "electrica", "eletricidade", "elétrica", "eletrica",
+    "tarifa eléctrica", "tarifa de energía", "tarifa de energia", "tarifas de energía",
+    "hidrógeno", "hidrogeno", "hidrógeno verde", "hidrogênio", "hidrogênio verde",
+    "renovable", "renovables", "renovável", "renováveis", "renovaveis",
+    "solar", "fotovoltaica", "fotovoltaico", "eólica", "eolica", "eólico", "eólico marino",
+    "hidroeléctrica", "hidroelectrica", "hidroeléctricas", "hidrelétrica", "termoeléctrica", "termoelectrica", "termelétrica",
+    "embalse", "embalses", "reservatório", "transmisión", "transmision", "transmissão",
+    "generación", "generacion", "geração", "distribución eléctrica", "red eléctrica",
+    "mercado eléctrico", "mercado mayorista", "apagón", "apagon", "apagones", "racionamiento",
+    "gas natural", "petróleo", "petroleo", "combustibles", "transición energética", "transicion energetica",
+    "descarbonización", "matriz energética", "litio", "baterías", "almacenamiento de energía",
+]
+
 # Nombres antiguos de columnas -> nombres nuevos (para no perder el histórico del CSV)
 COLUMNAS_RENOMBRADAS = {"Términos del Sector": "Temática"}
 
@@ -315,8 +332,29 @@ def compilar_patrones_pais(data):
     return {
         # "ICE", "SEC", "SEN"... solo en mayúsculas para evitar falsos positivos
         "entidades": [compilar_patron(siglas, False), compilar_patron(nombres, True)],
-        "terminos": [compilar_patron(data["terminos_sector"], True)],
+        # Sector del país + temáticas generales (ver TEMATICAS_GENERALES)
+        "terminos": [compilar_patron(list(data["terminos_sector"]) + TEMATICAS_GENERALES, True)],
     }
+
+
+def formatear_tematica(terminos):
+    return ", ".join(t.title() for t in terminos)
+
+
+def completar_tematica(df, config):
+    """Recalcula la Temática de filas vacías/N/A (histórico) y elimina las que no tienen ninguna."""
+    vacias = df["Temática"].str.strip().str.upper().isin(["", "N/A", "NAN"])
+    if vacias.any():
+        patrones = {pais: compilar_patrones_pais(data)["terminos"] for pais, data in config.items()}
+        generico = [compilar_patron(TEMATICAS_GENERALES, True)]
+        def calcular(fila):
+            texto = f"{fila['Título']} {fila['Resumen']}"
+            return formatear_tematica(coincidencias(texto, patrones.get(fila["País"], generico)))
+        df.loc[vacias, "Temática"] = df.loc[vacias].apply(calcular, axis=1)
+    sin_tematica = df["Temática"].str.strip() == ""
+    if sin_tematica.any():
+        log.warning("Se eliminan %d noticias del histórico sin temática en su texto.", int(sin_tematica.sum()))
+    return df[~sin_tematica]
 
 
 def coincidencias(texto, patrones):
@@ -367,11 +405,11 @@ def procesar_tarea(tarea, patrones, fecha_limite):
         resumen = limpiar_texto(entry.get("summary", entry.get("description", "")))
         texto = f"{titulo} {resumen}"
         terminos = coincidencias(texto, patrones["terminos"])
+        if not terminos:
+            continue  # Temática obligatoria: sin temática en el artículo, no se guarda
 
         if es_rss:
             entidades = coincidencias(texto, patrones["entidades"])
-            if not (entidades or terminos):
-                continue
             entidades_txt = ", ".join(e.upper() for e in entidades) if entidades else "N/A"
         else:
             entidades_txt = tarea["entidad"]
@@ -380,7 +418,7 @@ def procesar_tarea(tarea, patrones, fecha_limite):
             "País": tarea["pais"],
             "Fuente": nombre_fuente,
             "Entidades Coincidentes": entidades_txt,
-            "Temática": ", ".join(t.title() for t in terminos) if terminos else "N/A",
+            "Temática": formatear_tematica(terminos),
             "Linea de negocio": LINEA_NEGOCIO,
             "Palabras Clave (Keywords)": extraer_palabras_clave(texto),
             "Título": titulo,
@@ -423,7 +461,7 @@ def rastrear_noticias_multi_pais(config, dias_atras=DIAS_ATRAS):
 # =========================================================
 # ARCHIVO MAESTRO
 # =========================================================
-def construir_maestro(df_nuevas, archivo):
+def construir_maestro(df_nuevas, archivo, config=None):
     df_nuevas = df_nuevas.sort_values("_prioridad", kind="stable").drop(columns="_prioridad")
     total_previo = 0
     if os.path.exists(archivo):
@@ -440,6 +478,7 @@ def construir_maestro(df_nuevas, archivo):
 
     df = df.fillna("")
     df["Linea de negocio"] = df["Linea de negocio"].replace("", LINEA_NEGOCIO)
+    df = completar_tematica(df, config or CONFIGURACION_PAISES)
     titulos = df["País"] + "|" + df["Título"].map(normalizar_titulo)
     urls = df["URL Verificada"].map(normalizar_url)
     df["_url"] = urls.where(urls != "", titulos)
@@ -492,4 +531,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
